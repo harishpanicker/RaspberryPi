@@ -6,12 +6,18 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/delay.h>
+#include <linux/ioctl.h>
 #include <linux/uaccess.h>  //copy_to/from_user()
 #include <linux/gpio.h>     //GPIO
 
 //LED is connected to this GPIO
 #define GPIO_20 (20)
 
+#define SET_GPIO_PIN _IO('a','a') 
+#define CLEAR_GPIO_PIN _IO('a','b')
+#define READ_GPIO_PIN _IOR('a','c',int32_t*)
+
+int32_t data;
 dev_t dev = 0;
 static struct class *dev_class;
 static struct cdev my_cdev;
@@ -26,6 +32,7 @@ static ssize_t my_read(struct file *filp,
 		char __user *buf, size_t len,loff_t * off);
 static ssize_t my_write(struct file *filp, 
 		const char *buf, size_t len, loff_t * off);
+static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 
 static struct file_operations fops =
@@ -35,6 +42,7 @@ static struct file_operations fops =
 	.write          = my_write,
 	.open           = my_open,
 	.release        = my_release,
+	.unlocked_ioctl = my_ioctl,
 };
 
 /*
@@ -61,19 +69,7 @@ static int my_release(struct inode *inode, struct file *file)
 static ssize_t my_read(struct file *filp, 
 		char __user *buf, size_t len, loff_t *off)
 {
-	uint8_t gpio_state = 0;
-
-	//reading GPIO value
-	gpio_state = gpio_get_value(GPIO_20);
-
-	//write to user
-	len = 1;
-	if( copy_to_user(buf, &gpio_state, len) > 0) {
-		pr_err("ERROR: Not all the bytes have been copied to user\n");
-	}
-
-	pr_info("Read function : GPIO_20 = %d \n", gpio_state);
-
+	pr_info("Read function called,,,!!!!\n");
 	return 0;
 }
 
@@ -83,25 +79,37 @@ static ssize_t my_read(struct file *filp,
 static ssize_t my_write(struct file *filp, 
 		const char __user *buf, size_t len, loff_t *off)
 {
-	uint8_t rec_buf;
 
-	if( copy_from_user( rec_buf, buf, len ) > 0) {
-		pr_err("ERROR: Not all the bytes have been copied from user\n");
-	}
-
-	pr_info("Write Function : GPIO_20 Set = %c\n", rec_buf);
-
-	if (rec_buf=='1') {
-		//set the GPIO value to HIGH
-		gpio_set_value(GPIO_20, 1);
-	} else if (rec_buf=='0') {
-		//set the GPIO value to LOW
-		gpio_set_value(GPIO_20, 0);
-	} else {
-		pr_err("Unknown command : Please provide either 1 or 0 \n");
-	}
-
+	pr_info("Write Function called..!!! \n");
 	return len;
+}
+
+static long my_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+         switch(cmd) {
+                case SET_GPIO_PIN:
+			//set the GPIO value to HIGH
+			gpio_set_value(GPIO_20, 1);
+			pr_info("GPIO value is set...!!!\n");
+			break;
+		case CLEAR_GPIO_PIN:
+			//set the GPIO value to LOW
+			gpio_set_value(GPIO_20, 0);
+			pr_info("GPIO value is clear...!!!\n");
+			break;
+		case READ_GPIO_PIN:
+			data=gpio_get_value(GPIO_20);
+			if(copy_to_user((int32_t*)arg,&data,sizeof(data)))
+                        {
+                                pr_err("Data Read : Err!\n");
+                        }
+			pr_info("GPIO value is = %d\n",data);
+			break;
+                default:
+                        pr_info("Default\n");
+                        break;
+        }
+        return 0;
 }
 
 /*
