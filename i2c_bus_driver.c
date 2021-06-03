@@ -33,8 +33,8 @@ static int __init bmp280_init(void)
 
 static void __exit bmp280_exit(void)
 {
-	i2c_del_adapter(&adap);
 	pr_info("Bus Driver Module Removed..\n");
+	i2c_del_adapter(&adap);
 }
 
 
