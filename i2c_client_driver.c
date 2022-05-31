@@ -11,14 +11,23 @@
 #include <linux/i2c.h>
 #include "i2c_sensor.h"
 
-#define I2C_ADDRESS 0x76
-#define I2C_NAME "i2c-slave"
+#define MEM_SIZE 1024 
 
-dev_t dev = 0;
-static struct class *i2c_class;
-static struct cdev i2c_cdev;
-static struct i2c_client *bmp280_client = NULL;
-static struct i2c_adapter *adap = NULL;
+#define I2C_ADDRESS 0x76 
+#define I2C_NAME "i2c-slave" 
+
+#define RD_CHIP_VALUE   _IOR('a','a',int32_t*) 
+#define RD_TEMP_VALUE   _IOR('a','b',uint8_t*) 
+#define RD_PRESS_VALUE  _IOR('a','c',uint8_t*) 
+
+int32_t chip_id; 
+dev_t dev = 0; 
+static struct class *i2c_class; 
+static struct cdev i2c_cdev; 
+static struct i2c_client *bmp280_client = NULL; 
+static struct i2c_adapter *adap = NULL; 
+uint8_t kernel_buffer[20]; 
+//uint8_t *kernel_buffer; 
 
 
 /*
@@ -87,108 +96,7 @@ u32 i2c_read_pressure(void) {
 
 }
 
-/*
-** This function will be called when we open the Device file
-*/
-static int i2c_open(struct inode *inode, struct file *file)
-{
-        pr_info("Driver Open Function Called...!!!\n");
-        return 0;
-}
-
-/*
-** This function will be called when we close the Device file
-*/
-static int i2c_release(struct inode *inode, struct file *file)
-{
-        pr_info("Driver Release Function Called...!!!\n");
-        return 0;
-}
-
-/*
-** This function will be called when we read the Device file
-*/
-static ssize_t i2c_read(struct file *File, char *user_buffer, size_t count, loff_t *offs) {
-	int to_copy, not_copied, delta;
-	char out_string[20];
-	int temperature,pressure;
-
-	/* Get amount of bytes to copy */
-	to_copy = min(sizeof(out_string), count);
-
-	/* Get temperature */
-	temperature = i2c_read_temperature();
-	snprintf(out_string, sizeof(out_string), "%d.%d\n", temperature/100, temperature%100);
-
-	/*Get pressure*/
-	pressure = i2c_read_pressure();
-	pr_info("pressure value = %d.%d\n",pressure/100, pressure%100);
-
-	/* Copy Data to user */
-	not_copied = copy_to_user(user_buffer, out_string, to_copy);
-
-	/* Calculate delta */
-	delta = to_copy - not_copied;
-
-	return delta;
-}
-/*
-** This function will be called when we write the Device file
-*/
-static ssize_t i2c_write(struct file *filp, const char __user *buf, size_t len, loff_t *off)
-{
-        pr_info("Driver Write Function Called...!!!\n");
-        return len;
-}
-
-static struct file_operations fops =
-{
-    .owner      = THIS_MODULE,
-    .read       = i2c_read,
-    .write      = i2c_write,
-    .open       = i2c_open,
-    .release    = i2c_release,
-};
-
-
-int bmp280_probe(struct i2c_client *i2c_client, const struct i2c_device_id *device_id)
-{
-
-	u8 id;
-
-	pr_info("Probe called Successfully....\n");
-
-	/*Allocating Major number*/
-        if((alloc_chrdev_region(&dev, 0, 1, "I2c_Dev")) <0){
-                pr_err("Cannot allocate major number\n");
-                return -1;
-        }
-        pr_info("Major = %d Minor = %d \n",MAJOR(dev), MINOR(dev));
-
-        /*Creating cdev structure*/
-        cdev_init(&i2c_cdev,&fops);
-
-        /*Adding character device to the system*/
-        if((cdev_add(&i2c_cdev,dev,1)) < 0){
-            pr_err("Cannot add the device to the system\n");
-            goto r_class;
-        }
-
-        /*Creating struct class*/
-        if((i2c_class = class_create(THIS_MODULE,"i2c_class")) == NULL){
-            pr_err("Cannot create the struct class\n");
-            goto r_class;
-        }
-
-        /*Creating device*/
-        if((device_create(i2c_class,NULL,dev,NULL,"i2c_device")) == NULL){
-            pr_err("Cannot create the Device 1\n");
-            goto r_device;
-        }
-        
-	/* Read Chip ID */
-	id = i2c_smbus_read_byte_data(bmp280_client, 0xD0);
-	printk("ID: 0x%x\n", id);
+void bmp280_read_calbration(void) { 
 
 	/* Read Calibration Values */
 	dig_T1 = i2c_smbus_read_word_data(bmp280_client, BMP280_REG_TEMP_CALIB1);
@@ -218,8 +126,8 @@ int bmp280_probe(struct i2c_client *i2c_client, const struct i2c_device_id *devi
 	if(dig_P3 > 32767)
 		dig_P3 -= 65536;
 
-	if(dig_P4 > 32767)
-		dig_T2 -= 65536;
+	if(dig_P4 > 32767) 
+		dig_P4 -= 65536; 
 
 	if(dig_P5 > 32767)
 		dig_P5 -= 65536;
@@ -239,7 +147,120 @@ int bmp280_probe(struct i2c_client *i2c_client, const struct i2c_device_id *devi
 	/* Initialice the sensor */
 	i2c_smbus_write_byte_data(bmp280_client, 0xf5, 5<<5);
 	i2c_smbus_write_byte_data(bmp280_client, 0xf4, ((5<<5) | (5<<2) | (3<<0)));
-	return 0;
+} 
+
+
+static int i2c_open(struct inode *inode, struct file *file) 
+{ 
+	pr_info("Driver Open Function Called...!!!\n"); 
+	/*      if((kernel_buffer =(char *) kmalloc(1024 , GFP_KERNEL)) == 0){ 
+		pr_info("Cannot allocate memory in kernel\n"); 
+		return -1; 
+		}*/         
+	return 0; 
+} 
+
+static int i2c_release(struct inode *inode, struct file *file) 
+{ 
+	pr_info("Driver Release Function Called...!!!\n"); 
+	//      kfree(kernel_buffer); 
+	return 0; 
+} 
+void i2c_read_temp(void) 
+{ 
+	int temperature; 
+	temperature = i2c_read_temperature(); 
+	snprintf(kernel_buffer, sizeof(kernel_buffer), "%d.%d\n", temperature/100, temperature%100); 
+	pr_info("kernel_buffer = %s\n",kernel_buffer); 
+} 
+
+void i2c_read_press(void) 
+{ 
+	int pressure; 
+
+	pressure = i2c_read_pressure(); 
+	snprintf(kernel_buffer, (char)sizeof(kernel_buffer), "%d.%d\n", pressure/100, pressure%100); 
+
+	printk("Pressure = %s\n",kernel_buffer); 
+} 
+
+static long i2c_ioctl(struct file *file, unsigned int cmd, unsigned long arg) 
+{ 
+
+	switch(cmd) { 
+		case RD_CHIP_VALUE: 
+			if( copy_to_user((int32_t*) arg, &chip_id, sizeof(chip_id))) 
+			{ 
+				pr_err("Data Read for chip id : Err!\n"); 
+			} 
+			break; 
+		case RD_TEMP_VALUE: 
+			i2c_read_temp(); 
+			if( copy_to_user((int32_t*) arg, kernel_buffer, sizeof(kernel_buffer)) ) 
+			{ 
+				pr_err("Data Read for temperature : Err!\n"); 
+			} 
+			break; 
+		case RD_PRESS_VALUE: 
+			i2c_read_press(); 
+			if( copy_to_user((int32_t*) arg, kernel_buffer, sizeof(kernel_buffer))) 
+			{ 
+				pr_err("Data Read for pressure : Err!\n"); 
+			} 
+			break; 
+		default: 
+			pr_info("Default\n"); 
+			break; 
+	} 
+	return 0; 
+} 
+
+
+static struct file_operations fops = 
+{ 
+	.owner          = THIS_MODULE, 
+	.unlocked_ioctl = i2c_ioctl, 
+	.open           = i2c_open, 
+	.release        = i2c_release, 
+}; 
+
+
+int bmp280_probe(struct i2c_client *i2c_client, const struct i2c_device_id *device_id) 
+{ 
+
+	pr_info("Probe called Successfully....\n"); 
+
+	if((alloc_chrdev_region(&dev, 0, 1, "I2c_Dev")) <0){ 
+		pr_err("Cannot allocate major number\n"); 
+		return -1; 
+	} 
+	pr_info("Major = %d Minor = %d \n",MAJOR(dev), MINOR(dev)); 
+
+	cdev_init(&i2c_cdev,&fops); 
+
+	if((cdev_add(&i2c_cdev,dev,1)) < 0){ 
+		pr_err("Cannot add the device to the system\n"); 
+		goto r_class; 
+	} 
+
+	if((i2c_class = class_create(THIS_MODULE,"i2c_class")) == NULL){ 
+		pr_err("Cannot create the struct class\n"); 
+		goto r_class; 
+	} 
+
+	if((device_create(i2c_class,NULL,dev,NULL,"i2c_device")) == NULL){ 
+		pr_err("Cannot create the Device 1\n"); 
+		goto r_device; 
+	} 
+
+	chip_id = i2c_smbus_read_byte_data(bmp280_client, 0xD0); 
+	printk("ID: 0x%x\n", chip_id); 
+
+	if(chip_id!=0){ 
+		bmp280_read_calbration(); 
+	} 
+
+	return 0; 
 
 r_device:
         class_destroy(i2c_class);
@@ -248,12 +269,12 @@ r_class:
         return -1;
 }
 
-static const struct i2c_device_id dev_id[]={
-	{ I2C_NAME, I2C_ADDRESS
-	},
-	{}
-};
-MODULE_DEVICE_TABLE(i2c,dev_id);
+static const struct i2c_device_id dev_id[]={ 
+	{ I2C_NAME, 0 
+	}, 
+	{} 
+}; 
+MODULE_DEVICE_TABLE(i2c,dev_id); 
 
 static struct i2c_driver myclient_i2c = {
 	.class          = I2C_CLASS_DEPRECATED,
@@ -284,7 +305,6 @@ static int __init i2c_client_init(void)
 		printk("Registered new device to i2c-core\n");
 		i2c_add_driver(&myclient_i2c);
         }
-	i2c_put_adapter(adap);
 	return 0;
 }
 
